@@ -124,20 +124,59 @@ export async function listAll(
   return items;
 }
 
-// crm.item.update — patch a single record (used for tag-mode).
-export async function updateItem(
-  memberId: string,
-  entityTypeId: number,
-  id: number,
-  fields: Record<string, unknown>,
-): Promise<any> {
-  return call(memberId, 'crm.item.update', { entityTypeId, id, fields });
-}
-
 // crm.item.get — fetch one record (used by the on-create event handler).
 export async function getItem(memberId: string, entityTypeId: number, id: number): Promise<any | null> {
   const result = await call(memberId, 'crm.item.get', { entityTypeId, id });
   return result?.item ?? null;
+}
+
+// ── Tag mode: a dedicated CRM user-field the app owns ───────────────────────
+// Standard CRM entities have no native tags, so tag-mode writes to a UF field
+// we create on demand (crm.<entity>.userfield.*). We address it by our XML_ID so
+// the exact generated FIELD_NAME (UF_CRM_…) never has to be hard-coded.
+
+const TAG_FIELD_XML_ID = 'DEDUP_MERGER_TAG';
+const tagFieldCache = new Map<string, string>(); // `${memberId}:${entity}` → FIELD_NAME
+
+async function findTagField(memberId: string, entity: EntityName): Promise<string | null> {
+  const rows = await call(memberId, `crm.${entity}.userfield.list`, {});
+  const list = Array.isArray(rows) ? rows : [];
+  const row = list.find((r: any) => r.XML_ID === TAG_FIELD_XML_ID);
+  return row ? String(row.FIELD_NAME) : null;
+}
+
+// Return the tag UF field's real name, creating the field once if needed.
+export async function ensureTagField(memberId: string, entity: EntityName): Promise<string> {
+  const cacheKey = `${memberId}:${entity}`;
+  const cached = tagFieldCache.get(cacheKey);
+  if (cached) return cached;
+
+  let name = await findTagField(memberId, entity);
+  if (!name) {
+    await call(memberId, `crm.${entity}.userfield.add`, {
+      fields: {
+        FIELD_NAME: 'DEDUP_TAG',
+        USER_TYPE_ID: 'string',
+        XML_ID: TAG_FIELD_XML_ID,
+        EDIT_FORM_LABEL: 'Метка дубля',
+        LIST_COLUMN_LABEL: 'Метка дубля',
+      },
+    });
+    name = await findTagField(memberId, entity);
+  }
+  if (!name) throw new Error('tag user-field could not be created (admin rights required)');
+  tagFieldCache.set(cacheKey, name);
+  return name;
+}
+
+// crm.<entity>.update — raw-field update (uses real FIELD_NAME, not camelCase).
+export async function updateEntity(
+  memberId: string,
+  entity: EntityName,
+  id: number,
+  fields: Record<string, unknown>,
+): Promise<any> {
+  return call(memberId, `crm.${entity}.update`, { id, fields });
 }
 
 // CRM list-view menu entries that open the app's SPA. Bound on install so the

@@ -1,0 +1,48 @@
+# Local / single-host deployment: Postgres + backend API + static SPA.
+# Fill backend/.env first (CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, APP_HANDLER_URL,
+# EVENT_HANDLER_URL, CORS_ORIGIN). DATABASE_URL is injected below to point at `db`.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: bitrix24_dedup
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      # Override DATABASE_URL to reach the compose Postgres service.
+      DATABASE_URL: postgres://postgres:postgres@db:5432/bitrix24_dedup
+      PORT: "3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      args:
+        # Baked into the SPA at build time; point it at the public backend URL.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3000}
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

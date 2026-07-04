@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { ENTITY, EntityName, listAll, mergeBatch, updateItem, findByComm } from '../services/bitrix';
+import { ENTITY, EntityName, listAll, mergeBatch, ensureTagField, updateEntity, findByComm } from '../services/bitrix';
 import { MergeHistory, ScanStat } from '../db';
 import { createJob, getJob, runJob, updateJob } from '../jobStore';
 import { loadSettings, EntitySettings } from './settings';
@@ -222,14 +222,20 @@ export async function mergeGroup(
   if (s.tagMode) {
     const tag = s.tagName || 'duplicate';
     const dups = ids.slice(1);
-    for (const id of dups) {
-      try {
-        // crm.item stores tags/categories under UF fields; a comment-safe fallback
-        // is the built-in "title" prefix. We append the tag to a dedicated UF list
-        // via the entity's TAGS-like field when present, else skip gracefully.
-        await updateItem(mid, ENTITY[entity], id, { ufCrmDuplicateTag: tag });
-      } catch (err: any) {
-        console.warn(`tag ${entity}#${id} failed:`, err.message);
+    // Resolve (creating once if needed) the UF field we tag duplicates with.
+    let fieldName: string | null = null;
+    try {
+      fieldName = await ensureTagField(mid, entity);
+    } catch (err: any) {
+      console.warn(`tag field for ${entity} unavailable:`, err.message);
+    }
+    if (fieldName) {
+      for (const id of dups) {
+        try {
+          await updateEntity(mid, entity, id, { [fieldName]: tag });
+        } catch (err: any) {
+          console.warn(`tag ${entity}#${id} failed:`, err.message);
+        }
       }
     }
     await recordMerge(mid, entity, ids[0], mainName, dups);

@@ -62,16 +62,42 @@ Required scope: **`crm`**.
 ## Layout
 
 ```
-backend/   Express + TS: Bitrix24 REST, scan/merge, settings, history, stats
-client/    Vite + React SPA: find / settings / history / stats
-app/       Bitrix24 app registration guide (handler, scope, placements)
+backend/   Express 5 + TS 6: Bitrix24 REST (rate-limited), scan/merge/search,
+           per-entity settings, history, stats, event.bind auto-merge handler
+client/    Vite 8 + React 19 SPA: find/search/merge, per-entity settings, history, stats
+app/       Bitrix24 app registration guide (handler, scope, placements, events)
 ```
 
-## Run
+## Run (local dev)
 
 ```bash
+# Backend
 cd backend
 npm install
-cp .env.example .env   # fill CLIENT_ID / CLIENT_SECRET / REDIRECT_URI
+cp .env.example .env   # fill CLIENT_ID / CLIENT_SECRET / REDIRECT_URI / APP_HANDLER_URL
+npm run dev
+
+# Client (separate terminal)
+cd client
+npm install
+cp .env.example .env   # set VITE_API_BASE_URL=http://localhost:3000
 npm run dev
 ```
+
+## Run (Docker)
+
+One command brings up Postgres + backend + the static SPA:
+
+```bash
+cp backend/.env.example backend/.env      # fill OAuth creds; DATABASE_URL is set by compose
+export VITE_API_BASE_URL=https://your-backend.example.com   # baked into the SPA build
+docker compose up --build
+```
+
+- SPA → `http://localhost:8080`
+- API → `http://localhost:3000`
+- Postgres → persisted in the `pgdata` volume
+
+For production put both behind HTTPS (a reverse proxy / the platform's TLS) and
+set `REDIRECT_URI`, `APP_HANDLER_URL`, `EVENT_HANDLER_URL`, `CORS_ORIGIN`, and
+`VITE_API_BASE_URL` to the public URLs.
